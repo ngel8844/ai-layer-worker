@@ -1,63 +1,45 @@
+import zlib from "zlib";
+
 export default async function handler(req, res) {
   try {
-    if (req.method !== "POST") {
-      return res.status(405).json({ error: "POST only" });
-    }
+    if (req.method !== "POST") return res.status(405).json({ error: "POST only" });
 
     const { fileId, accessToken } = req.body;
     if (!fileId || !accessToken) {
       return res.status(400).json({ error: "Missing fileId or accessToken" });
     }
 
-    // Download from Google Drive
-    const pdfRes = await fetch(
+    const r = await fetch(
       `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`,
-      {
-        headers: { Authorization: "Bearer " + accessToken },
-      }
+      { headers: { Authorization: "Bearer " + accessToken } }
     );
+    if (!r.ok) return res.status(502).json({ error: "Drive fetch failed" });
 
-    if (!pdfRes.ok) {
-      return res.status(500).json({
-        error: "Drive download failed",
-        status: pdfRes.status,
-      });
+    const buf = Buffer.from(await r.arrayBuffer());
+
+    // 1) Try plain AIPrivateData
+    let aiText = findAIPrivateData(buf);
+
+    // 2) If not found, look for compressed streams that contain AIPrivateData
+    if (!aiText) {
+      aiText = findAIPrivateDataInFlateStreams(buf);
     }
 
-    // Read into buffer
-    const buf = Buffer.from(await pdfRes.arrayBuffer());
-
-    // Convert to text for AIPrivateData scan
-    const text = buf.toString("utf8");
-
-    // Extract Illustrator block
-    const aiMatch = text.match(/%AIPrivateDataBegin([\s\S]*?)%AIPrivateDataEnd/);
-    if (!aiMatch) {
+    if (!aiText) {
       return res.json({
         ok: false,
-        message: "No Illustrator data found — not an AI-based file",
+        message:
+          "No AIPrivateData found. File is either non-PDF-compatible AI or uses an unsupported compression.",
       });
     }
 
-    const ai = aiMatch[1];
-
-    // Find all layer blocks
-    const layerBlocks = [...ai.matchAll(/\(Layer([\s\S]*?)\)/g)];
-
+    // Parse layers
     const layers = [];
-
-    for (const m of layerBlocks) {
-      const block = m[1];
-
-      const nameMatch = block.match(/\(Name\s+"([^"]+)"\)/);
-      const visMatch = block.match(/\(Visible\s+(true|false)\)/);
-
-      if (!nameMatch) continue;
-
-      layers.push({
-        name: nameMatch[1],
-        visible: visMatch ? visMatch[1] === "true" : true,
-      });
+    for (const m of aiText.matchAll(/\(Layer([\s\S]*?)\)/g)) {
+      const b = m[1];
+      const name = b.match(/\(Name\s+"([^"]+)"\)/)?.[1];
+      const vis = b.match(/\(Visible\s+(true|false)\)/)?.[1] ?? "true";
+      if (name) layers.push({ name, visible: vis === "true" });
     }
 
     return res.json({
@@ -67,10 +49,31 @@ export default async function handler(req, res) {
       layers,
     });
   } catch (e) {
-    console.error(e);
-    return res.status(500).json({
-      error: e.message,
-      stack: e.stack,
-    });
+    return res.status(500).json({ error: e.message, stack: e.stack });
   }
+}
+
+/* ---------- helpers ---------- */
+
+function findAIPrivateData(buf) {
+  const s = buf.toString("latin1");
+  const m = s.match(/%AIPrivateDataBegin([\s\S]*?)%AIPrivateDataEnd/);
+  return m ? m[1] : null;
+}
+
+function findAIPrivateDataInFlateStreams(buf) {
+  const s = buf.toString("latin1");
+  const streams = [...s.matchAll(/stream\r?\n([\s\S]*?)\r?\nendstream/g)];
+
+  for (const m of streams) {
+    const raw = Buffer.from(m[1], "latin1");
+    try {
+      const inflated = zlib.inflateSync(raw).toString("latin1");
+      const ai = inflated.match(/%AIPrivateDataBegin([\s\S]*?)%AIPrivateDataEnd/);
+      if (ai) return ai[1];
+    } catch {
+      // not flate or not our stream
+    }
+  }
+  return null;
 }
