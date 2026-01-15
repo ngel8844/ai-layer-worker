@@ -1,5 +1,3 @@
-import fetch from "node-fetch";
-
 export default async function handler(req, res) {
   try {
     if (req.method !== "POST") {
@@ -32,19 +30,18 @@ export default async function handler(req, res) {
       });
     }
 
-    const pdfBuffer = Buffer.from(await pdfRes.arrayBuffer());
+    const buf = Buffer.from(await pdfRes.arrayBuffer());
 
-    console.log("PDF size", pdfBuffer.length);
+    console.log("PDF bytes:", buf.length);
 
-    // Just sanity test for now
     return res.json({
       ok: true,
-      bytes: pdfBuffer.length,
-      message: "PDF received. Ready to parse OCGs next.",
+      bytes: buf.length,
+      message: "PDF received. Ready to extract layers.",
     });
   } catch (e) {
     console.error(e);
-    res.status(500).json({
+    return res.status(500).json({
       error: e.message,
       stack: e.stack,
     });
