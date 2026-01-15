@@ -1,8 +1,8 @@
 {
-  "name": "ai-layer-worker",
+  "name": "ai-layer-api",
   "private": true,
   "type": "module",
   "dependencies": {
-    "pdfjs-dist": "^4.10.38"
+    "pdf-lib": "^1.17.1"
   }
 }
