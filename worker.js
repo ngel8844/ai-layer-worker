@@ -1,5 +1,8 @@
 import * as pdfjsLib from "pdfjs-dist/build/pdf.mjs";
 
+pdfjsLib.GlobalWorkerOptions.workerSrc = null;
+pdfjsLib.disableWorker = true;
+
 export default {
   async fetch(request) {
     try {
