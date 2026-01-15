@@ -1,8 +1,5 @@
 import * as pdfjsLib from "pdfjs-dist/build/pdf.mjs";
 
-pdfjsLib.GlobalWorkerOptions.workerSrc = null;
-pdfjsLib.disableWorker = true;
-
 export default {
   async fetch(request) {
     try {
@@ -11,8 +8,11 @@ export default {
       }
 
       const { fileId, accessToken } = await request.json();
+      if (!fileId || !accessToken) {
+        return new Response("Missing fileId or accessToken", { status: 400 });
+      }
 
-      // Custom range loader for Google Drive
+      // Custom range-based loader for Google Drive
       const rangeTransport = {
         getRange: async (begin, end) => {
           const res = await fetch(
@@ -37,17 +37,19 @@ export default {
 
       const loadingTask = pdfjsLib.getDocument({
         range: rangeTransport,
+        disableWorker: true,
         disableStream: false,
         disableAutoFetch: false,
       });
 
       const pdf = await loadingTask.promise;
 
-      // Access Catalog → OCProperties
+      // Catalog → OCProperties
       const catalog = await pdf.catalog;
       const ocProps = await catalog.get("OCProperties");
-
-      if (!ocProps) return Response.json({ visibleLayers: [] });
+      if (!ocProps) {
+        return Response.json({ visibleLayers: [] });
+      }
 
       const ocgs = await ocProps.get("OCGs");
       const d = await ocProps.get("D");
