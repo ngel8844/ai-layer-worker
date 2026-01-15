@@ -1,5 +1,7 @@
 import * as pdfjsLib from "pdfjs-dist/build/pdf.mjs";
 
+pdfjsLib.GlobalWorkerOptions.workerSrc = "data:application/javascript;base64,";
+
 export default {
   async fetch(request) {
     try {
