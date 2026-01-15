@@ -1,60 +1,52 @@
-import { PDFDocument, PDFName } from "pdf-lib";
+import fetch from "node-fetch";
 
-export async function onRequestPost(context) {
+export default async function handler(req, res) {
   try {
-    const { request } = context;
-    const { fileId, accessToken } = await request.json();
+    if (req.method !== "POST") {
+      return res.status(405).json({ error: "POST only" });
+    }
+
+    const { fileId, accessToken } = req.body;
 
     if (!fileId || !accessToken) {
-      return new Response("Missing fileId or accessToken", { status: 400 });
+      return res.status(400).json({ error: "Missing fileId or accessToken" });
     }
 
-    // Stream file from Drive
-    const driveRes = await fetch(
+    console.log("Downloading PDF", fileId);
+
+    const driveUrl =
       "https://www.googleapis.com/drive/v3/files/" +
-        encodeURIComponent(fileId) +
-        "?alt=media",
-      {
-        headers: {
-          Authorization: "Bearer " + accessToken,
-        },
-      }
-    );
+      fileId +
+      "?alt=media";
 
-    if (!driveRes.ok) {
-      return new Response("Drive fetch failed", { status: 502 });
+    const pdfRes = await fetch(driveUrl, {
+      headers: {
+        Authorization: "Bearer " + accessToken,
+      },
+    });
+
+    if (!pdfRes.ok) {
+      return res.status(500).json({
+        error: "Drive download failed",
+        status: pdfRes.status,
+      });
     }
 
-    // pdf-lib needs full ArrayBuffer, but Node has much higher memory
-    const bytes = await driveRes.arrayBuffer();
+    const pdfBuffer = Buffer.from(await pdfRes.arrayBuffer());
 
-    const pdf = await PDFDocument.load(bytes, { ignoreEncryption: true });
+    console.log("PDF size", pdfBuffer.length);
 
-    const ocProps = pdf.catalog.get(PDFName.of("OCProperties"));
-    if (!ocProps) return Response.json({ visibleLayers: [] });
-
-    const ocgs = ocProps.get(PDFName.of("OCGs"));
-    const d = ocProps.get(PDFName.of("D"));
-
-    const off = new Set();
-    if (d?.has(PDFName.of("OFF"))) {
-      for (const ref of d.get(PDFName.of("OFF"))) {
-        off.add(ref.objectNumber);
-      }
-    }
-
-    const visible = [];
-
-    for (const ocg of ocgs) {
-      const id = ocg.objectNumber;
-      if (off.has(id)) continue;
-
-      const name = ocg.get(PDFName.of("Name"))?.decodeText();
-      if (name) visible.push(name);
-    }
-
-    return Response.json({ visibleLayers: visible });
-  } catch (err) {
-    return new Response("Error: " + (err?.stack || err), { status: 500 });
+    // Just sanity test for now
+    return res.json({
+      ok: true,
+      bytes: pdfBuffer.length,
+      message: "PDF received. Ready to parse OCGs next.",
+    });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({
+      error: e.message,
+      stack: e.stack,
+    });
   }
 }
